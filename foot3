@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mini Foot 3v3</title>
+<style>
+:root{--bg:#f4f4f0;--fg:#1a1a1a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1b;--fg:#f0f0f0}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;text-align:center}
+h1{font-size:1.2rem;margin:12px 0 4px}
+#hud{font-size:1.4rem;font-weight:700;margin:4px}
+canvas{width:min(96vw,720px);max-width:100%;touch-action:none;border-radius:8px;display:block;margin:0 auto}
+p{font-size:.85rem;opacity:.8;margin:8px}
+button{font-size:1rem;padding:8px 18px;margin:0 4px;border-radius:8px;border:0;background:#2a6fdb;color:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+<h1>⚽ Mini Foot 3 contre 3</h1>
+<div id="hud">Toi 0 – 0 Ordi · 90s</div>
+<canvas id="c" width="600" height="360"></canvas>
+<p>Flèches / ZQSD ou glisse le doigt. Tu contrôles le joueur le plus proche du ballon (anneau jaune). Marque à droite !</p>
+<button id="b">Rejouer</button><button id="m">🔊 Musique</button>
+<script>
+const c=document.getElementById('c'),g=c.getContext('2d'),W=600,H=360,GY=130,GH=100;
+const FORM=[[50,180],[190,100],[190,260]];
+let blue,red,ball,s,frames,keys={},target=null,ctl=0;
+function mk(team){return FORM.map(f=>({x:team?f[0]:W-f[0],y:f[1],hx:team?f[0]:W-f[0],hy:f[1],r:15}))}
+function reset(full){
+  blue=mk(1);red=mk(0);ball={x:W/2,y:H/2,r:9,vx:0,vy:0};
+  if(full){s=[0,0];frames=5400}
+}
+reset(true);
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=1;startMusic()});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=0);
+function pos(e){const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}}
+c.addEventListener('pointerdown',e=>{target=pos(e);startMusic()});
+c.addEventListener('pointermove',e=>{if(target)target=pos(e)});
+addEventListener('pointerup',()=>target=null);
+document.getElementById('b').onclick=()=>reset(true);
+function move(o,tx,ty,sp){
+  const dx=tx-o.x,dy=ty-o.y,d=Math.hypot(dx,dy);
+  if(d>3){o.x+=dx/d*sp;o.y+=dy/d*sp}
+  o.x=Math.max(o.r,Math.min(W-o.r,o.x));o.y=Math.max(o.r,Math.min(H-o.r,o.y));
+}
+function hit(o,pw){
+  const dx=ball.x-o.x,dy=ball.y-o.y,d=Math.hypot(dx,dy),m=o.r+ball.r;
+  if(d<m&&d>0){ball.x=o.x+dx/d*m;ball.y=o.y+dy/d*m;ball.vx=dx/d*pw;ball.vy=dy/d*pw}
+}
+const dist=o=>Math.hypot(o.x-ball.x,o.y-ball.y);
+function ai(team,dir,skip,sp){
+  // dir=1 : attaque vers la droite
+  let ch=-1,best=1e9;
+  team.forEach((o,i)=>{if(i!==skip&&dist(o)<best){best=dist(o);ch=i}});
+  team.forEach((o,i)=>{
+    if(i===skip)return;
+    if(i===ch&&(i>0||Math.abs(ball.x-o.hx)<150))move(o,ball.x-dir*20,ball.y,sp);
+    else move(o,o.hx+(ball.x-o.hx)*.25,o.hy+(ball.y-o.hy)*.4,sp*.8);
+  });
+}
+function update(){
+  if(frames<=0)return;
+  frames--;
+  // joueur contrôlé : le plus proche du ballon (avec hystérésis)
+  let n=0;blue.forEach((o,i)=>{if(dist(o)<dist(blue[n]))n=i});
+  if(dist(blue[n])+25<dist(blue[ctl]))ctl=n;
+  const me=blue[ctl];
+  let dx=(keys.arrowright||keys.d?1:0)-(keys.arrowleft||keys.q||keys.a?1:0);
+  let dy=(keys.arrowdown||keys.s?1:0)-(keys.arrowup||keys.z||keys.w?1:0);
+  if(dx||dy)move(me,me.x+dx*50,me.y+dy*50,3.4);
+  else if(target)move(me,target.x,target.y,3.4);
+  ai(blue,1,ctl,2.4);ai(red,-1,-1,2.5);
+  [...blue,...red].forEach(o=>hit(o,7));
+  ball.x+=ball.vx;ball.y+=ball.vy;ball.vx*=.985;ball.vy*=.985;
+  if(ball.y<ball.r||ball.y>H-ball.r){ball.vy*=-1;ball.y=Math.max(ball.r,Math.min(H-ball.r,ball.y))}
+  const inG=ball.y>GY&&ball.y<GY+GH;
+  if(ball.x<ball.r&&!inG){ball.vx*=-1;ball.x=ball.r}
+  if(ball.x>W-ball.r&&!inG){ball.vx*=-1;ball.x=W-ball.r}
+  if(ball.x<0){s[1]++;goalSound();reset()}
+  if(ball.x>W){s[0]++;goalSound();reset()}
+  const t=Math.ceil(frames/60);
+  document.getElementById('hud').textContent=frames>0?`Toi ${s[0]} – ${s[1]} Ordi · ${t}s`:
+    `Fin ! ${s[0]} – ${s[1]} ${s[0]>s[1]?'🏆 Victoire':s[0]<s[1]?'Défaite':'Égalité'}`;
+}
+function circ(o,col,ring){
+  g.beginPath();g.arc(o.x,o.y,o.r,0,7);g.fillStyle=col;g.fill();
+  g.strokeStyle=ring||'#fff';g.lineWidth=ring?3:2;g.stroke();
+}
+function draw(){
+  g.fillStyle='#2e8b3d';g.fillRect(0,0,W,H);
+  g.strokeStyle='#fff';g.lineWidth=2;g.strokeRect(2,2,W-4,H-4);
+  g.beginPath();g.moveTo(W/2,0);g.lineTo(W/2,H);g.stroke();
+  g.beginPath();g.arc(W/2,H/2,45,0,7);g.stroke();
+  g.fillStyle='#fff';g.fillRect(0,GY,6,GH);g.fillRect(W-6,GY,6,GH);
+  blue.forEach((o,i)=>circ(o,'#2a6fdb',i===ctl?'#ffd400':null));
+  red.forEach(o=>circ(o,'#d62f2f'));
+  circ(ball,'#fff');
+}
+// ---- Musique (Web Audio, chiptune) ----
+let ac,on=false,step=0,timer,vol;
+const hz=n=>440*2**((n-69)/12);
+const MEL=[72,0,76,79,0,76,74,0,72,0,76,79,84,0,79,0,77,0,81,84,0,81,79,0,76,74,72,0,67,0,0,0];
+const BASS=[48,55,48,55,48,55,48,55,53,60,53,60,55,62,55,62];
+function tone(f,t,d,type,v){
+  const o=ac.createOscillator(),e=ac.createGain();
+  o.type=type;o.frequency.value=f;
+  e.gain.setValueAtTime(v,t);e.gain.exponentialRampToValueAtTime(.001,t+d);
+  o.connect(e);e.connect(vol);o.start(t);o.stop(t+d);
+}
+function tick(){
+  const t=ac.currentTime+.02,m=MEL[step%32],b=BASS[Math.floor(step/2)%16];
+  if(m)tone(hz(m),t,.22,'square',.07);
+  if(step%2===0)tone(hz(b-12),t,.28,'triangle',.18);
+  if(step%4===0)tone(90,t,.1,'sine',.25);
+  step++;
+}
+function startMusic(){
+  if(!ac){ac=new(window.AudioContext||window.webkitAudioContext)();vol=ac.createGain();vol.gain.value=.6;vol.connect(ac.destination)}
+  if(on)return;
+  on=true;ac.resume();timer=setInterval(tick,150);
+  document.getElementById('m').textContent='🔊 Musique';
+}
+function stopMusic(){on=false;clearInterval(timer);document.getElementById('m').textContent='🔇 Musique'}
+document.getElementById('m').onclick=()=>on?stopMusic():startMusic();
+function goalSound(){
+  if(!ac||!on)return;
+  [72,76,79,84,88].forEach((n,i)=>tone(hz(n),ac.currentTime+i*.08,.3,'square',.12));
+}
+(function loop(){update();draw();requestAnimationFrame(loop)})();
+</script>
+</body>
+</html>
